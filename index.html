@@ -1150,7 +1150,32 @@
     el._t = setTimeout(() => el.className = '', 3200);
   }
 
+  // ── CHAVE DE API AUTOMÁTICA ──
+  // O endpoint de geração é público. Criamos uma chave WRITE e guardamos no
+  // browser para o chat e as operações de escrita funcionarem sem passos manuais.
+  async function garantirApiKey() {
+    const input = document.getElementById('apiKeyInput');
+    if (input.value.trim()) return;
+    try {
+      const res = await fetch(BASE + '/api/auth/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner: 'Frontend Barbie Dreamworld', accessLevel: 'WRITE' })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.apiKey) {
+          input.value = d.apiKey;
+          localStorage.setItem('barbie_api_key', d.apiKey);
+        }
+      }
+    } catch (e) { /* a API vai dormir; o utilizador pode gerar a chave no separador Auth */ }
+  }
+
   // ── INIT ──
+  const savedKey = localStorage.getItem('barbie_api_key');
+  if (savedKey) document.getElementById('apiKeyInput').value = savedKey;
+  garantirApiKey();
   goTo('barbies');
 </script>
 </body>
