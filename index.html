@@ -632,17 +632,36 @@
 
   function apiKey() { return document.getElementById('apiKeyInput').value.trim(); }
 
-  async function req(path, method='GET', body=null) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (apiKey()) headers['X-API-Key'] = apiKey();
-    if (method === 'POST') headers['Idempotency-Key'] = crypto.randomUUID();
-    const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  async function tratarResposta(res) {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.message || err.error || `Erro ${res.status}`);
     }
     if (res.status === 204) return null;
     return res.json();
+  }
+
+  async function req(path, method='GET', body=null) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey()) headers['X-API-Key'] = apiKey();
+    if (method === 'POST') headers['Idempotency-Key'] = crypto.randomUUID();
+    const payload = body ? JSON.stringify(body) : undefined;
+
+    let res = await fetch(BASE + path, { method, headers, body: payload });
+
+    // Se a chave não existe ou foi revogada (ex.: API reiniciou), geramos
+    // outra e repetimos a requisição uma vez, sem exigir ação do utilizador.
+    if (res.status === 401 && path !== '/api/auth/api-keys') {
+      localStorage.removeItem('barbie_api_key');
+      document.getElementById('apiKeyInput').value = '';
+      await garantirApiKey();
+      if (apiKey()) {
+        headers['X-API-Key'] = apiKey();
+        res = await fetch(BASE + path, { method, headers, body: payload });
+      }
+    }
+
+    return tratarResposta(res);
   }
 
   const sections = ['barbies','profissoes','dreamhouses','acessorios','eventos','assistente','auth'];
@@ -1176,6 +1195,8 @@
   const savedKey = localStorage.getItem('barbie_api_key');
   if (savedKey) document.getElementById('apiKeyInput').value = savedKey;
   garantirApiKey();
+  // A API do Render pode estar a acordar no primeiro acesso: tentamos de novo.
+  setTimeout(() => { if (!apiKey()) garantirApiKey(); }, 8000);
   goTo('barbies');
 </script>
 </body>
