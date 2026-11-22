@@ -404,6 +404,40 @@
       border-radius: 16px; border: 1.5px solid var(--border);
       box-shadow: 0 8px 24px rgba(255,45,120,.15);
     }
+    /* Conversa com a estilista IA */
+    .chat-panel { display: flex; flex-direction: column; height: 540px; }
+    .chat-msgs { flex: 1; overflow-y: auto; padding: .4rem .2rem .8rem; }
+    .chat-msg { display: flex; flex-direction: column; margin-bottom: 1rem; }
+    .chat-msg.user { align-items: flex-end; }
+    .chat-msg.ia { align-items: flex-start; }
+    .chat-bubble {
+      max-width: 94%; padding: .8rem 1rem; border-radius: 16px;
+      font-size: .88rem; line-height: 1.55;
+    }
+    .chat-msg.user .chat-bubble {
+      background: var(--pink); color: #fff; border-bottom-right-radius: 4px;
+    }
+    .chat-msg.ia .chat-bubble {
+      background: var(--card-bg); border: 1.5px solid var(--border);
+      border-bottom-left-radius: 4px; width: 94%;
+    }
+    .chat-bubble .ia-imagem { max-width: 250px; margin: .8rem auto .3rem; }
+    .chat-bubble .ia-look-titulo { font-size: 1.15rem; }
+    .chat-input-row {
+      display: flex; gap: .5rem; padding-top: .8rem;
+      border-top: 1.5px solid var(--border);
+    }
+    .chat-input-row input[type=text] {
+      flex: 1; min-width: 0; padding: .75rem 1rem;
+      border: 1.5px solid var(--border); border-radius: 12px;
+      font-family: 'DM Sans', sans-serif; font-size: .88rem;
+      background: var(--white); color: var(--text); outline: none;
+    }
+    .chat-input-row input[type=text]:focus {
+      border-color: var(--pink); box-shadow: 0 0 0 3px rgba(255,45,120,.12);
+    }
+    .chat-input-row .btn-pink { white-space: nowrap; }
+
     .ia-look-titulo {
       font-family: 'Playfair Display', serif; font-size: 1.5rem;
       color: var(--pink-deep); margin-bottom: .5rem;
@@ -519,14 +553,20 @@
         <button class="btn-pink" style="width:100%" onclick="gerarLook()">Gerar look com IA ✨</button>
       </div>
 
-      <div class="ia-result">
-        <h3>🎀 Resultado</h3>
-        <div class="ia-loading" id="iaLoading">
-          <div class="spinner"></div>
-          A IA está criando seu look e desenhando a Barbie… isso pode levar alguns segundos.
+      <div class="ia-result chat-panel">
+        <h3>💬 Conversa com a estilista IA</h3>
+        <div class="chat-msgs" id="chatMsgs">
+          <div class="ia-empty" id="chatEmpty">
+            Olá! Sou a estilista IA da Barbie 💖<br>
+            Escolhe uma Barbie à esquerda e conta-me a ocasião.<br>
+            Vou criar o look e desenhar a Barbie para ti!
+          </div>
         </div>
-        <div id="iaResultado">
-          <div class="ia-empty">Preencha o formulário e clique em "Gerar look com IA" para ver o resultado aqui. 🌸</div>
+        <div class="chat-input-row">
+          <input type="text" id="chatInput"
+                 placeholder="Ex: festa glamourosa no jardim, cores quentes..."
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();enviarMensagem();}" />
+          <button class="btn-pink" onclick="enviarMensagem()">Enviar ➤</button>
         </div>
       </div>
     </div>
@@ -999,6 +1039,75 @@
     })[c]);
   }
 
+  // ── CONVERSA COM A ESTILISTA IA ──
+  function addChatBubble(tipo, html) {
+    const empty = document.getElementById('chatEmpty');
+    if (empty) empty.remove();
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-msg ' + tipo;
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.innerHTML = html;
+    wrap.appendChild(bubble);
+    const msgs = document.getElementById('chatMsgs');
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+    return bubble;
+  }
+
+  function htmlLook(data) {
+    const corTags = (data.paletaCores || []).map(c => `<span class="tag">🎨 ${escapeHtml(c)}</span>`).join('');
+    const acessTags = (data.acessoriosDoAcervoRecomendados || []).map(a => `<span class="tag green">👛 ${escapeHtml(a)}</span>`).join('');
+    const itens = (data.itensSugeridos || []).map(i => `
+      <li><strong>${escapeHtml(i.nome)}</strong> <span style="color:var(--muted)">(${escapeHtml(i.categoria)})</span><br>${escapeHtml(i.motivo)}</li>
+    `).join('');
+    const imagem = data.imagem?.dataUrl
+      ? `<img class="ia-imagem" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" />`
+      : '';
+    return `
+      ${imagem}
+      <div class="ia-look-titulo">${escapeHtml(data.tituloLook)}</div>
+      <div class="ia-look-resumo">${escapeHtml(data.resumo)}</div>
+      <div class="ia-tags">${corTags}${acessTags}</div>
+      ${itens ? `<ul class="ia-items">${itens}</ul>` : ''}
+      <button class="btn-outline" onclick="copiarLook()">📋 Copiar look</button>
+    `;
+  }
+
+  async function gerarLookChat(body) {
+    const bubble = addChatBubble('ia',
+      '<div class="spinner"></div><div style="text-align:center">A criar o look e a desenhar a Barbie…</div>');
+    try {
+      const data = await req(IA_PATH, 'POST', body);
+      bubble.innerHTML = htmlLook(data);
+      window._ultimoLook = data;
+      toast('Look gerado com sucesso! ✨', 'success');
+    } catch (e) {
+      bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
+      toast(e.message, 'error');
+    }
+  }
+
+  async function enviarMensagem() {
+    const input = document.getElementById('chatInput');
+    const mensagem = input.value.trim();
+    if (!mensagem) { toast('Escreve uma mensagem!', 'error'); return; }
+    const barbieId = document.getElementById('iaBarbie').value;
+    if (!barbieId) { toast('Selecione uma Barbie primeiro!', 'error'); return; }
+
+    input.value = '';
+    addChatBubble('user', escapeHtml(mensagem));
+
+    const eventoId = document.getElementById('iaEvento').value;
+    const preferencias = document.getElementById('iaPreferencias').value.trim();
+    const body = { barbieId: Number(barbieId) };
+    if (eventoId) body.eventoId = Number(eventoId);
+    else body.ocasiao = mensagem;
+    if (preferencias) body.preferencias = preferencias;
+
+    await gerarLookChat(body);
+  }
+
   async function gerarLook() {
     const barbieId = document.getElementById('iaBarbie').value;
     const eventoId = document.getElementById('iaEvento').value;
@@ -1008,43 +1117,14 @@
     if (!barbieId) { toast('Selecione uma Barbie!', 'error'); return; }
     if (!eventoId && !ocasiao) { toast('Escolha um evento OU descreva a ocasião!', 'error'); return; }
 
+    addChatBubble('user', escapeHtml(ocasiao || 'Usar evento cadastrado'));
+
     const body = { barbieId: Number(barbieId) };
     if (eventoId) body.eventoId = Number(eventoId);
     else body.ocasiao = ocasiao;
     if (preferencias) body.preferencias = preferencias;
 
-    const loading = document.getElementById('iaLoading');
-    const resultado = document.getElementById('iaResultado');
-    loading.classList.add('show');
-    resultado.innerHTML = '';
-
-    try {
-      const data = await req(IA_PATH, 'POST', body);
-      const corTags = (data.paletaCores || []).map(c => `<span class="tag">🎨 ${escapeHtml(c)}</span>`).join('');
-      const acessTags = (data.acessoriosDoAcervoRecomendados || []).map(a => `<span class="tag green">👛 ${escapeHtml(a)}</span>`).join('');
-      const itens = (data.itensSugeridos || []).map(i => `
-        <li><strong>${escapeHtml(i.nome)}</strong> <span style="color:var(--muted)">(${escapeHtml(i.categoria)})</span><br>${escapeHtml(i.motivo)}</li>
-      `).join('');
-      const imagem = data.imagem?.dataUrl
-        ? `<img class="ia-imagem" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" />`
-        : '';
-
-      resultado.innerHTML = `
-        ${imagem}
-        <div class="ia-look-titulo">${escapeHtml(data.tituloLook)}</div>
-        <div class="ia-look-resumo">${escapeHtml(data.resumo)}</div>
-        <div class="ia-tags">${corTags}${acessTags}</div>
-        ${itens ? `<ul class="ia-items">${itens}</ul>` : ''}
-        <button class="btn-outline" onclick="copiarLook()">📋 Copiar look</button>
-      `;
-      window._ultimoLook = data;
-      toast('Look gerado com sucesso! ✨', 'success');
-    } catch (e) {
-      resultado.innerHTML = `<div class="ia-empty" style="color:#c0392b">💔 ${escapeHtml(e.message)}</div>`;
-      toast(e.message, 'error');
-    } finally {
-      loading.classList.remove('show');
-    }
+    await gerarLookChat(body);
   }
 
   function copiarLook() {
