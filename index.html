@@ -1066,6 +1066,7 @@
       : '';
     return `
       ${imagem}
+      ${data.avisoImagem ? `<div style="background:#fff4d6;border:1px solid #f0c36d;border-radius:10px;padding:.6rem .8rem;margin-bottom:.7rem;font-size:.8rem">⚠️ ${escapeHtml(data.avisoImagem)}</div>` : ''}
       <div class="ia-look-titulo">${escapeHtml(data.tituloLook)}</div>
       <div class="ia-look-resumo">${escapeHtml(data.resumo)}</div>
       <div class="ia-tags">${corTags}${acessTags}</div>
