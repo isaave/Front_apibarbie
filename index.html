@@ -1196,6 +1196,7 @@
       : '';
     return `
       ${imagem}
+      ${data.aviso ? `<div style="background:#eef4ff;border:1px solid #a9c2ef;border-radius:10px;padding:.6rem .8rem;margin-bottom:.7rem;font-size:.8rem">ℹ️ ${escapeHtml(data.aviso)}</div>` : ''}
       ${data.avisoImagem ? `<div style="background:#fff4d6;border:1px solid #f0c36d;border-radius:10px;padding:.6rem .8rem;margin-bottom:.7rem;font-size:.8rem">⚠️ ${escapeHtml(data.avisoImagem)}</div>` : ''}
       <div class="ia-look-titulo">${escapeHtml(data.tituloLook)}</div>
       <div class="ia-look-resumo">${escapeHtml(data.resumo)}</div>
@@ -1284,6 +1285,7 @@
       <div class="ia-dicas">
         <div class="ia-dicas-titulo">${escapeHtml(data.titulo)}</div>
         <div class="ia-dicas-resumo">${escapeHtml(data.resumo)}</div>
+        ${data.aviso ? `<div style="background:#eef4ff;border:1px solid #a9c2ef;border-radius:10px;padding:.6rem .8rem;margin-bottom:.7rem;font-size:.8rem">ℹ️ ${escapeHtml(data.aviso)}</div>` : ''}
         ${cards}
         ${data.toqueFinal ? `<div class="ia-toque-final">💖 ${escapeHtml(data.toqueFinal)}</div>` : ''}
       </div>
