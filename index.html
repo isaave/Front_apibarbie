@@ -1209,6 +1209,7 @@
       paletaCores: d.paletaCores || [],
       itensSugeridos: (d.itensSugeridos || []).map(i => typeof i === 'string' ? i : i.nome),
       acessoriosRecomendados: d.acessoriosDoAcervoRecomendados || [],
+      promptImagem: d.promptImagem || '',
       foco: foco || ''
     };
     if (d._eventoId) body.eventoId = d._eventoId;
