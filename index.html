@@ -1113,7 +1113,7 @@
       <li><strong>${escapeHtml(i.nome)}</strong> <span style="color:var(--muted)">(${escapeHtml(i.categoria)})</span><br>${escapeHtml(i.motivo)}</li>
     `).join('');
     const imagem = data.imagem?.dataUrl
-      ? `<img class="ia-imagem" id="imgLook${lookId}" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" />`
+      ? `<img class="ia-imagem" id="imgLook${lookId}" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" onerror="recuperarImagem(${lookId}, this)" />`
       : '';
     return `
       ${imagem}
@@ -1130,6 +1130,48 @@
     `;
   }
   htmlLook.seq = 0;
+
+  function placeholderImagem(mensagem) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="683">
+      <rect width="512" height="683" fill="#ffe4ef"/>
+      <circle cx="256" cy="250" r="92" fill="#ff8fb8"/>
+      <path d="M120 620 Q256 400 392 620 Z" fill="#ff4f92"/>
+      <text x="256" y="470" text-anchor="middle" font-family="Arial" font-size="24" fill="#8a1c4b">Barbie Dreamworld</text>
+      <text x="256" y="510" text-anchor="middle" font-family="Arial" font-size="16" fill="#a24a70">${mensagem}</text>
+    </svg>`;
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  }
+
+  async function recuperarImagem(lookId, el) {
+    if (el.dataset.recuperando === '1') return;
+    el.dataset.recuperando = '1';
+    el.dataset.tentativas = String(Number(el.dataset.tentativas || 0) + 1);
+    el.src = placeholderImagem('A preparar outra imagem…');
+
+    const d = (window._looks || {})[lookId] || window._ultimoLook;
+    if (!d) { el.dataset.recuperando = '0'; return; }
+
+    try {
+      const img = await req(IA_PATH + '/regerar-imagem', 'POST', corpoLook(d));
+      d.imagem = img;
+      el.src = img.dataUrl + '&retry=' + Date.now();
+      toast('Nova imagem carregada! 🎨', 'success');
+    } catch (e) {
+      if (Number(el.dataset.tentativas) < 3) {
+        // O gerador gratuito pode limitar a 1 imagem por IP a cada 45s.
+        setTimeout(() => {
+          el.dataset.recuperando = '0';
+          recuperarImagem(lookId, el);
+        }, 46000);
+        el.src = placeholderImagem('A aguardar o gerador…');
+      } else {
+        el.src = placeholderImagem('Clique em "Outra imagem" para tentar');
+      }
+    }
+    if (el.dataset.recuperando === '1') {
+      setTimeout(() => { el.dataset.recuperando = '0'; }, 1000);
+    }
+  }
 
   function htmlDicas(data) {
     const cards = (data.dicas || []).map(d => `
