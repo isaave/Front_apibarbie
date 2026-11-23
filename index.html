@@ -502,7 +502,7 @@
   <!-- API Key bar (hidden in auth section) -->
   <div class="apikey-panel" id="apikeyBar">
     <label>🔑 X-API-Key ativa</label>
-    <input id="apiKeyInput" type="text" placeholder="Vá em Auth para gerar sua chave…" readonly />
+    <input id="apiKeyInput" type="text" placeholder="Vá em Auth para gerar sua chave…" maxlength="80" readonly />
     <button class="btn-outline" onclick="goTo('auth')">Gerenciar →</button>
   </div>
 
@@ -516,17 +516,16 @@
         <p class="auth-card-desc">Crie uma API Key para autenticar suas requisições de criação, edição e exclusão.</p>
         <div class="form-group" style="margin-top:1.2rem">
           <label>Seu nome / responsável *</label>
-          <input id="reg_owner" type="text" placeholder="Ex: Barbie Dev" />
+          <input id="reg_owner" type="text" placeholder="Ex: Barbie Dev" maxlength="100" required />
         </div>
         <div class="form-group">
           <label>Nível de acesso</label>
           <select id="reg_level">
             <option value="READ">READ — só consultas</option>
             <option value="WRITE" selected>WRITE — consultas + alterações</option>
-            <option value="ADMIN">ADMIN — acesso completo</option>
           </select>
         </div>
-        <button class="btn-pink" style="width:100%;margin-top:.5rem" onclick="registrar()">Gerar chave 🗝️</button>
+        <button class="btn-pink" id="btnRegistrar" style="width:100%;margin-top:.5rem" onclick="registrar()">Gerar chave 🗝️</button>
 
         <!-- resultado -->
         <div id="reg_result" style="display:none;margin-top:1.2rem">
@@ -568,13 +567,13 @@
         <select id="iaEvento"><option value="">— Nenhum / usar ocasião livre —</option></select>
 
         <label for="iaOcasiao">Ocasião livre (se não escolher evento) *</label>
-        <textarea id="iaOcasiao" placeholder="Ex: uma festa glamourosa no jardim"></textarea>
+        <textarea id="iaOcasiao" placeholder="Ex: uma festa glamourosa no jardim" maxlength="200"></textarea>
         <div class="ia-hint">Informe um evento OU descreva a ocasião. Se ambos forem dados, o evento tem prioridade.</div>
 
         <label for="iaPreferencias">Preferências adicionais</label>
-        <textarea id="iaPreferencias" placeholder="Ex: prefiro cores quentes e acessórios prateados"></textarea>
+        <textarea id="iaPreferencias" placeholder="Ex: prefiro cores quentes e acessórios prateados" maxlength="500"></textarea>
 
-        <button class="btn-pink" style="width:100%" onclick="gerarLook()">Gerar look com IA ✨</button>
+        <button class="btn-pink" id="btnGerarLook" style="width:100%" onclick="gerarLook()">Gerar look com IA ✨</button>
       </div>
 
       <div class="ia-result chat-panel">
@@ -587,10 +586,10 @@
           </div>
         </div>
         <div class="chat-input-row">
-          <input type="text" id="chatInput"
+          <input type="text" id="chatInput" maxlength="1000"
                  placeholder="Ex: festa glamourosa no jardim, cores quentes..."
                  onkeydown="if(event.key==='Enter'){event.preventDefault();enviarMensagem();}" />
-          <button class="btn-pink" onclick="enviarMensagem()">Enviar ➤</button>
+          <button class="btn-pink" id="btnEnviar" onclick="enviarMensagem()">Enviar ➤</button>
         </div>
       </div>
     </div>
@@ -605,7 +604,7 @@
 
   <!-- Search -->
   <div class="search-bar">
-    <input id="searchInput" type="text" placeholder="Buscar por nome…" />
+    <input id="searchInput" type="text" placeholder="Buscar por nome…" maxlength="100" />
     <button class="btn-pink" onclick="buscar()">Buscar</button>
     <button class="btn-outline" onclick="resetBusca()">Limpar</button>
   </div>
@@ -627,7 +626,7 @@
     <div class="modal-title" id="modalTitle">Nova Barbie</div>
     <div id="modalForm"></div>
     <div class="modal-actions">
-      <button class="btn-pink" onclick="salvar()" style="flex:1">Salvar</button>
+      <button class="btn-pink" id="btnSalvar" onclick="salvar()" style="flex:1">Salvar</button>
       <button class="btn-outline" onclick="fecharModal()">Cancelar</button>
     </div>
   </div>
@@ -643,6 +642,7 @@
   let totalPages = 1;
   let editingId = null;
   let searchTerm = '';
+  let garantindoChave = null;
 
   const sectionConfig = {
     barbies:     { title: 'Minhas <em>Barbies</em>',     path: '/api/barbies',     fields: barbieFields,     render: renderBarbie },
@@ -656,13 +656,42 @@
 
   function apiKey() { return document.getElementById('apiKeyInput').value.trim(); }
 
+  const TIMEOUT_MS = 60000;
+  const IA_TIMEOUT_MS = 180000;
+
+  function mensagemErro(res, err) {
+    if (res.status === 429) {
+      const retry = res.headers.get('Retry-After');
+      return `Muitas requisições 😅 Aguarde ${retry || 'alguns'} segundo(s) e tente de novo.`;
+    }
+    if (res.status === 401) return 'Chave de API inválida ou expirada. Gerando outra automaticamente…';
+    if (res.status === 403) return 'Sua chave não tem permissão para esta operação.';
+    if (res.status === 503) return 'O serviço de IA está indisponível agora. Tente novamente em instantes.';
+    if (res.status >= 500) return 'O servidor está temporariamente indisponível. Tente novamente em instantes.';
+    return err?.message || err?.error || `Erro ${res.status}`;
+  }
+
   async function tratarResposta(res) {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.error || `Erro ${res.status}`);
+      throw new Error(mensagemErro(res, err));
     }
     if (res.status === 204) return null;
     return res.json();
+  }
+
+  function fetchComTimeout(path, options) {
+    const controller = new AbortController();
+    const prazo = path.startsWith('/api/ia') ? IA_TIMEOUT_MS : TIMEOUT_MS;
+    const timer = setTimeout(() => controller.abort(), prazo);
+    return fetch(BASE + path, { ...options, signal: controller.signal })
+      .catch(e => {
+        if (e.name === 'AbortError') {
+          throw new Error('A requisição demorou muito. Verifique sua conexão e tente novamente.');
+        }
+        throw new Error('Não foi possível conectar à API. O servidor pode estar acordando — tente de novo em instantes.');
+      })
+      .finally(() => clearTimeout(timer));
   }
 
   async function req(path, method='GET', body=null) {
@@ -670,22 +699,31 @@
     if (apiKey()) headers['X-API-Key'] = apiKey();
     if (method === 'POST') headers['Idempotency-Key'] = crypto.randomUUID();
     const payload = body ? JSON.stringify(body) : undefined;
+    const options = { method, headers, body: payload };
 
-    let res = await fetch(BASE + path, { method, headers, body: payload });
+    let res = await fetchComTimeout(path, options);
 
-    // Se a chave não existe ou foi revogada (ex.: API reiniciou), geramos
-    // outra e repetimos a requisição uma vez, sem exigir ação do utilizador.
+    // Se a API reiniciou e revogou a chave, geramos outra e repetimos uma vez.
     if (res.status === 401 && path !== '/api/auth/api-keys') {
       localStorage.removeItem('barbie_api_key');
       document.getElementById('apiKeyInput').value = '';
       await garantirApiKey();
       if (apiKey()) {
         headers['X-API-Key'] = apiKey();
-        res = await fetch(BASE + path, { method, headers, body: payload });
+        res = await fetchComTimeout(path, { ...options, headers });
       }
     }
 
     return tratarResposta(res);
+  }
+
+  async function comLoading(btn, fn) {
+    if (!btn || btn.disabled) return;
+    const texto = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Aguarde…';
+    try { return await fn(); }
+    finally { btn.disabled = false; btn.textContent = texto; }
   }
 
   const sections = ['barbies','profissoes','dreamhouses','acessorios','eventos','assistente','auth'];
@@ -743,7 +781,7 @@
       content.innerHTML = `<div class="cards-grid">${items.map(cfg.render).join('')}</div>`;
       renderPagination();
     } catch(e) {
-      content.innerHTML = `<div class="state-msg"><div class="icon">💔</div><p>${e.message}</p></div>`;
+      content.innerHTML = `<div class="state-msg"><div class="icon">💔</div><p>${escapeHtml(e.message)}</p></div>`;
     }
   }
 
@@ -784,24 +822,39 @@
     const owner = document.getElementById('reg_owner').value.trim();
     const level = document.getElementById('reg_level').value;
     if (!owner) { toast('Informe seu nome!', 'error'); return; }
-    try {
-      const data = await req('/api/auth/api-keys', 'POST', { owner, accessLevel: level });
-      const key = data.apiKey || data.keyValue || data.key || '';
-      document.getElementById('reg_keyValue').textContent = key;
-      document.getElementById('reg_result').style.display = 'block';
-      toast('Chave gerada com sucesso! ✨', 'success');
-      carregarChaves();
-    } catch(e) { toast(e.message, 'error'); }
+
+    await comLoading(document.getElementById('btnRegistrar'), async () => {
+      try {
+        const data = await req('/api/auth/api-keys', 'POST', { owner, accessLevel: level });
+        const key = data.apiKey || '';
+        if (!key) throw new Error('A API não devolveu a chave. Tente novamente.');
+        document.getElementById('reg_keyValue').textContent = key;
+        document.getElementById('reg_result').style.display = 'block';
+        localStorage.setItem('barbie_api_key', key);
+        document.getElementById('apiKeyInput').value = key;
+        toast('Chave gerada e ativada! ✨', 'success');
+        carregarChaves();
+      } catch(e) { toast(e.message, 'error'); }
+    });
   }
 
   function copiarChave() {
-    const key = document.getElementById('reg_keyValue').textContent;
-    navigator.clipboard.writeText(key).then(() => toast('Chave copiada! 📋', 'success'));
+    const key = document.getElementById('reg_keyValue').textContent.trim();
+    if (!key) { toast('Gere uma chave primeiro!', 'error'); return; }
+    if (!navigator.clipboard?.writeText) {
+      toast('Copiagem não disponível. Selecione a chave e copie manualmente.', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(key)
+      .then(() => toast('Chave copiada! 📋', 'success'))
+      .catch(() => toast('Não foi possível copiar. Selecione a chave e copie manualmente.', 'error'));
   }
 
   function usarChave() {
-    const key = document.getElementById('reg_keyValue').textContent;
+    const key = document.getElementById('reg_keyValue').textContent.trim();
+    if (!key) { toast('Gere uma chave primeiro!', 'error'); return; }
     document.getElementById('apiKeyInput').value = key;
+    localStorage.setItem('barbie_api_key', key);
     toast('Chave definida como ativa! 💖', 'success');
     goTo('barbies');
   }
@@ -812,7 +865,8 @@
     el.innerHTML = '<div class="state-msg"><div class="icon">🌸</div><p>Carregando…</p></div>';
     try {
       const keys = await req('/api/auth/api-keys');
-      if (!keys.length) {
+      const lista = Array.isArray(keys) ? keys : [];
+      if (!lista.length) {
         el.innerHTML = '<div class="state-msg"><div class="icon">🔑</div><p>Nenhuma chave cadastrada ainda.</p></div>';
         return;
       }
@@ -821,127 +875,140 @@
           <thead><tr>
             <th>#</th><th>Responsável</th><th>Chave</th><th>Nível</th><th>Status</th><th>Criada em</th><th>Ações</th>
           </tr></thead>
-          <tbody>${keys.map(k => `
+          <tbody>${lista.map(k => `
             <tr>
-              <td>${k.id}</td>
-              <td><strong>${k.owner}</strong></td>
-              <td><span class="key-mono">${(k.apiKey||k.keyValue||'').substring(0,18)}…</span></td>
-              <td><span class="badge ${k.accessLevel}">${k.accessLevel}</span></td>
-              <td><span class="badge ${k.active?'ativo':'inativo'}">${k.active?'Ativa':'Revogada'}</span></td>
-              <td>${k.createdAt ? new Date(k.createdAt).toLocaleDateString('pt-BR') : '—'}</td>
-              <td style="display:flex;gap:.4rem;flex-wrap:wrap">
-                ${k.active ? `<button class="btn-usar" onclick="aplicarChave('${k.apiKey||k.keyValue||''}')">Usar</button>
-                <button class="btn-revoke" onclick="revogarChave(${k.id})">Revogar</button>` : '<span style="color:var(--muted);font-size:.78rem">—</span>'}
+              <td>${escapeHtml(k.id)}</td>
+              <td><strong>${escapeHtml(k.owner)}</strong></td>
+              <td><span class="key-mono">•••• oculta</span></td>
+              <td><span class="badge ${escapeHtml(k.accessLevel)}">${escapeHtml(k.accessLevel)}</span></td>
+              <td><span class="badge ${k.active ? 'ativo' : 'inativo'}">${k.active ? 'Ativa' : 'Revogada'}</span></td>
+              <td>${k.createdAt ? escapeHtml(new Date(k.createdAt).toLocaleDateString('pt-BR')) : '—'}</td>
+              <td>${k.active
+                ? `<button class="btn-revoke" onclick="revogarChave(${Number(k.id)}, this)">Revogar</button>`
+                : '<span style="color:var(--muted);font-size:.78rem">—</span>'}
               </td>
             </tr>`).join('')}
           </tbody>
-        </table>`;
-    } catch(e) { el.innerHTML = `<div class="state-msg"><div class="icon">💔</div><p>${e.message}</p></div>`; }
+        </table>
+        <p class="ia-hint" style="margin-top:.8rem">Por segurança, a chave completa aparece apenas no momento da criação.</p>`;
+    } catch(e) {
+      el.innerHTML = `<div class="state-msg"><div class="icon">💔</div><p>${escapeHtml(e.message)}</p></div>`;
+    }
   }
 
   function aplicarChave(key) {
+    if (!key) return;
     document.getElementById('apiKeyInput').value = key;
+    localStorage.setItem('barbie_api_key', key);
     toast('Chave ativa definida! 💖', 'success');
   }
 
-  async function revogarChave(id) {
+  async function revogarChave(id, btn) {
     if (!confirm('Revogar esta chave? Ela não poderá mais ser usada. 💔')) return;
-    try {
-      await req('/api/auth/api-keys/' + id, 'DELETE');
-      toast('Chave revogada!', 'success');
-      carregarChaves();
-    } catch(e) { toast(e.message, 'error'); }
+    await comLoading(btn, async () => {
+      try {
+        // Revogação exige nível ADMIN; a chave WRITE do frontend não pode revogar.
+        await req('/api/auth/api-keys/' + id, 'DELETE');
+        toast('Chave revogada!', 'success');
+        carregarChaves();
+      } catch(e) { toast(e.message, 'error'); }
+    });
   }
 
   // ── RENDER CARDS ──
   function renderBarbie(b) {
+    const id = Number(b.id);
     return `<div class="card">
-      <div class="card-id">#${b.id}</div>
-      <div class="card-name">${b.nome}</div>
-      <div class="card-sub">${b.colecao || '—'}</div>
+      <div class="card-id">#${escapeHtml(b.id)}</div>
+      <div class="card-name">${escapeHtml(b.nome)}</div>
+      <div class="card-sub">${escapeHtml(b.colecao || '—')}</div>
       <div class="card-tags">
-        ${b.nomeProfissao ? `<span class="tag">${b.nomeProfissao}</span>` : ''}
-        ${b.areaAtuacao   ? `<span class="tag blue">${b.areaAtuacao}</span>` : ''}
-        ${b.nomeCasa      ? `<span class="tag green">🏠 ${b.nomeCasa}</span>` : ''}
+        ${b.nomeProfissao ? `<span class="tag">${escapeHtml(b.nomeProfissao)}</span>` : ''}
+        ${b.areaAtuacao   ? `<span class="tag blue">${escapeHtml(b.areaAtuacao)}</span>` : ''}
+        ${b.nomeCasa      ? `<span class="tag green">🏠 ${escapeHtml(b.nomeCasa)}</span>` : ''}
       </div>
       <div class="card-meta">
-        <span>👛 ${b.totalAcessorios ?? 0} acessórios</span>
-        <span>🎉 ${b.totalEventos ?? 0} eventos</span>
+        <span>👛 ${escapeHtml(b.totalAcessorios ?? 0)} acessórios</span>
+        <span>🎉 ${escapeHtml(b.totalEventos ?? 0)} eventos</span>
       </div>
       <div class="card-actions">
-        <button class="btn-sm edit" onclick="abrirModal(${b.id})">Editar</button>
-        <button class="btn-sm del"  onclick="deletar(${b.id})">Deletar</button>
+        <button class="btn-sm edit" onclick="abrirModal(${id})">Editar</button>
+        <button class="btn-sm del"  onclick="deletar(${id}, this)">Deletar</button>
       </div>
     </div>`;
   }
 
   function renderProfissao(p) {
+    const id = Number(p.id);
     return `<div class="card">
-      <div class="card-id">#${p.id}</div>
-      <div class="card-name">${p.nomeProfissao}</div>
-      <div class="card-sub">${p.areaAtuacao || '—'}</div>
-      <div class="card-tags"><span class="tag blue">${p.areaAtuacao || ''}</span></div>
+      <div class="card-id">#${escapeHtml(p.id)}</div>
+      <div class="card-name">${escapeHtml(p.nomeProfissao)}</div>
+      <div class="card-sub">${escapeHtml(p.areaAtuacao || '—')}</div>
+      <div class="card-tags"><span class="tag blue">${escapeHtml(p.areaAtuacao || '')}</span></div>
       <div class="card-actions">
-        <button class="btn-sm edit" onclick="abrirModal(${p.id})">Editar</button>
-        <button class="btn-sm del"  onclick="deletar(${p.id})">Deletar</button>
+        <button class="btn-sm edit" onclick="abrirModal(${id})">Editar</button>
+        <button class="btn-sm del"  onclick="deletar(${id}, this)">Deletar</button>
       </div>
     </div>`;
   }
 
   function renderDreamhouse(d) {
+    const id = Number(d.id);
     return `<div class="card">
-      <div class="card-id">#${d.id}</div>
-      <div class="card-name">${d.nomeCasa}</div>
-      <div class="card-sub">${d.localizacao || '—'}</div>
+      <div class="card-id">#${escapeHtml(d.id)}</div>
+      <div class="card-name">${escapeHtml(d.nomeCasa)}</div>
+      <div class="card-sub">${escapeHtml(d.localizacao || '—')}</div>
       <div class="card-tags">
-        ${d.nomeBarbie ? `<span class="tag">💖 ${d.nomeBarbie}</span>` : '<span class="tag yellow">Sem proprietária</span>'}
+        ${d.nomeBarbie ? `<span class="tag">💖 ${escapeHtml(d.nomeBarbie)}</span>` : '<span class="tag yellow">Sem proprietária</span>'}
       </div>
       <div class="card-actions">
-        <button class="btn-sm edit" onclick="abrirModal(${d.id})">Editar</button>
-        <button class="btn-sm del"  onclick="deletar(${d.id})">Deletar</button>
+        <button class="btn-sm edit" onclick="abrirModal(${id})">Editar</button>
+        <button class="btn-sm del"  onclick="deletar(${id}, this)">Deletar</button>
       </div>
     </div>`;
   }
 
   function renderAcessorio(a) {
+    const id = Number(a.id);
     return `<div class="card">
-      <div class="card-id">#${a.id}</div>
-      <div class="card-name">${a.nome}</div>
-      <div class="card-sub">${a.categoria || '—'}</div>
+      <div class="card-id">#${escapeHtml(a.id)}</div>
+      <div class="card-name">${escapeHtml(a.nome)}</div>
+      <div class="card-sub">${escapeHtml(a.categoria || '—')}</div>
       <div class="card-tags">
-        ${a.raridade ? `<span class="tag yellow">★ ${a.raridade}</span>` : ''}
-        ${a.nomeBarbie ? `<span class="tag">💖 ${a.nomeBarbie}</span>` : ''}
+        ${a.raridade ? `<span class="tag yellow">★ ${escapeHtml(a.raridade)}</span>` : ''}
+        ${a.nomeBarbie ? `<span class="tag">💖 ${escapeHtml(a.nomeBarbie)}</span>` : ''}
       </div>
       <div class="card-actions">
-        <button class="btn-sm edit" onclick="abrirModal(${a.id})">Editar</button>
-        <button class="btn-sm del"  onclick="deletar(${a.id})">Deletar</button>
+        <button class="btn-sm edit" onclick="abrirModal(${id})">Editar</button>
+        <button class="btn-sm del"  onclick="deletar(${id}, this)">Deletar</button>
       </div>
     </div>`;
   }
 
   function renderEvento(e) {
-    const data = e.dataEvento ? new Date(e.dataEvento).toLocaleDateString('pt-BR') : '—';
+    const id = Number(e.id);
+    const data = e.dataEvento ? escapeHtml(new Date(e.dataEvento).toLocaleDateString('pt-BR')) : '—';
     return `<div class="card">
-      <div class="card-id">#${e.id}</div>
-      <div class="card-name">${e.nomeEvento}</div>
+      <div class="card-id">#${escapeHtml(e.id)}</div>
+      <div class="card-name">${escapeHtml(e.nomeEvento)}</div>
       <div class="card-sub">${data}</div>
       <div class="card-tags">
-        ${e.local ? `<span class="tag blue">📍 ${e.local}</span>` : ''}
-        <span class="tag">${e.totalParticipantes ?? 0} participantes</span>
+        ${e.local ? `<span class="tag blue">📍 ${escapeHtml(e.local)}</span>` : ''}
+        <span class="tag">${escapeHtml(e.totalParticipantes ?? 0)} participantes</span>
       </div>
       <div class="card-actions">
-        <button class="btn-sm edit" onclick="abrirModal(${e.id})">Editar</button>
-        <button class="btn-sm del"  onclick="deletar(${e.id})">Deletar</button>
+        <button class="btn-sm edit" onclick="abrirModal(${id})">Editar</button>
+        <button class="btn-sm del"  onclick="deletar(${id}, this)">Deletar</button>
       </div>
     </div>`;
   }
 
   // ── FORM FIELDS ──
   function barbieFields(d={}) { return `
-    <div class="form-group"><label>Nome *</label><input id="f_nome" value="${d.nome||''}" placeholder="Barbie Astronauta" /></div>
-    <div class="form-group"><label>Coleção *</label><input id="f_colecao" value="${d.colecao||''}" placeholder="Barbie Space" /></div>
-    <div class="form-group"><label>ID da Profissão</label><input id="f_profissaoId" type="number" value="${d.profissaoId||''}" placeholder="ex: 1" /></div>
-    <div class="form-group"><label>ID da Dreamhouse</label><input id="f_dreamhouseId" type="number" value="${d.dreamhouseId||''}" placeholder="ex: 2" /></div>
+    <div class="form-group"><label>Nome *</label><input id="f_nome" value="${escapeHtml(d.nome||'')}" placeholder="Barbie Astronauta" maxlength="100" required /></div>
+    <div class="form-group"><label>Coleção *</label><input id="f_colecao" value="${escapeHtml(d.colecao||'')}" placeholder="Barbie Space" maxlength="100" required /></div>
+    <div class="form-group"><label>ID da Profissão</label><input id="f_profissaoId" type="number" min="1" value="${escapeHtml(d.profissaoId||'')}" placeholder="ex: 1" /></div>
+    <div class="form-group"><label>ID da Dreamhouse</label><input id="f_dreamhouseId" type="number" min="1" value="${escapeHtml(d.dreamhouseId||'')}" placeholder="ex: 2" /></div>
   `; }
   function barbieBody() { return {
     nome: document.getElementById('f_nome').value,
@@ -951,8 +1018,8 @@
   }; }
 
   function profissaoFields(d={}) { return `
-    <div class="form-group"><label>Nome da Profissão *</label><input id="f_nomeProfissao" value="${d.nomeProfissao||''}" placeholder="Cientista" /></div>
-    <div class="form-group"><label>Área de Atuação</label><input id="f_areaAtuacao" value="${d.areaAtuacao||''}" placeholder="Ciências" /></div>
+    <div class="form-group"><label>Nome da Profissão *</label><input id="f_nomeProfissao" value="${escapeHtml(d.nomeProfissao||'')}" placeholder="Cientista" maxlength="100" required /></div>
+    <div class="form-group"><label>Área de Atuação</label><input id="f_areaAtuacao" value="${escapeHtml(d.areaAtuacao||'')}" placeholder="Ciências" maxlength="100" /></div>
   `; }
   function profissaoBody() { return {
     nomeProfissao: document.getElementById('f_nomeProfissao').value,
@@ -960,8 +1027,8 @@
   }; }
 
   function dreamhouseFields(d={}) { return `
-    <div class="form-group"><label>Nome da Casa *</label><input id="f_nomeCasa" value="${d.nomeCasa||''}" placeholder="Casa dos Sonhos" /></div>
-    <div class="form-group"><label>Localização</label><input id="f_localizacao" value="${d.localizacao||''}" placeholder="Malibu" /></div>
+    <div class="form-group"><label>Nome da Casa *</label><input id="f_nomeCasa" value="${escapeHtml(d.nomeCasa||'')}" placeholder="Casa dos Sonhos" maxlength="100" required /></div>
+    <div class="form-group"><label>Localização</label><input id="f_localizacao" value="${escapeHtml(d.localizacao||'')}" placeholder="Malibu" maxlength="100" /></div>
   `; }
   function dreamhouseBody() { return {
     nomeCasa: document.getElementById('f_nomeCasa').value,
@@ -969,15 +1036,15 @@
   }; }
 
   function acessorioFields(d={}) { return `
-    <div class="form-group"><label>Nome *</label><input id="f_nome" value="${d.nome||''}" placeholder="Bolsa Pink" /></div>
-    <div class="form-group"><label>Categoria</label><input id="f_categoria" value="${d.categoria||''}" placeholder="Moda" /></div>
+    <div class="form-group"><label>Nome *</label><input id="f_nome" value="${escapeHtml(d.nome||'')}" placeholder="Bolsa Pink" maxlength="100" required /></div>
+    <div class="form-group"><label>Categoria</label><input id="f_categoria" value="${escapeHtml(d.categoria||'')}" placeholder="Moda" maxlength="100" /></div>
     <div class="form-group"><label>Raridade</label>
       <select id="f_raridade">
         <option value="">Selecione</option>
-        ${['COMUM','INCOMUM','RARO','ÉPICO','LENDÁRIO'].map(r=>`<option ${d.raridade===r?'selected':''}>${r}</option>`).join('')}
+        ${['COMUM','INCOMUM','RARO','ÉPICO','LENDÁRIO'].map(r=>`<option value="${escapeHtml(r)}" ${d.raridade===r?'selected':''}>${escapeHtml(r)}</option>`).join('')}
       </select>
     </div>
-    <div class="form-group"><label>ID da Barbie</label><input id="f_barbieId" type="number" value="${d.barbieId||''}" placeholder="ex: 1" /></div>
+    <div class="form-group"><label>ID da Barbie</label><input id="f_barbieId" type="number" min="1" value="${escapeHtml(d.barbieId||'')}" placeholder="ex: 1" /></div>
   `; }
   function acessorioBody() { return {
     nome: document.getElementById('f_nome').value,
@@ -987,9 +1054,9 @@
   }; }
 
   function eventoFields(d={}) { return `
-    <div class="form-group"><label>Nome do Evento *</label><input id="f_nomeEvento" value="${d.nomeEvento||''}" placeholder="Festa da Barbie" /></div>
-    <div class="form-group"><label>Data</label><input id="f_dataEvento" type="date" value="${d.dataEvento?.substring(0,10)||''}" /></div>
-    <div class="form-group"><label>Local</label><input id="f_local" value="${d.local||''}" placeholder="Dreamhouse" /></div>
+    <div class="form-group"><label>Nome do Evento *</label><input id="f_nomeEvento" value="${escapeHtml(d.nomeEvento||'')}" placeholder="Festa da Barbie" maxlength="100" required /></div>
+    <div class="form-group"><label>Data</label><input id="f_dataEvento" type="date" value="${escapeHtml(d.dataEvento?.substring(0,10)||'')}" /></div>
+    <div class="form-group"><label>Local</label><input id="f_local" value="${escapeHtml(d.local||'')}" placeholder="Dreamhouse" maxlength="100" /></div>
   `; }
   function eventoBody() { return {
     nomeEvento: document.getElementById('f_nomeEvento').value,
@@ -1022,28 +1089,40 @@
 
   async function salvar() {
     const cfg = sectionConfig[currentSection];
+    const obrigatorios = [...document.querySelectorAll('#modalForm [required]')];
+    const vazio = obrigatorios.find(i => !String(i.value).trim());
+    if (vazio) {
+      toast('Preencha os campos obrigatórios (*).', 'error');
+      vazio.focus();
+      return;
+    }
+
     const body = bodyFn[currentSection]();
-    try {
-      if (editingId) {
-        await req(cfg.path + '/' + editingId, 'PUT', body);
-        toast('Atualizado com sucesso! 💖', 'success');
-      } else {
-        await req(cfg.path, 'POST', body);
-        toast('Criado com sucesso! ✨', 'success');
-      }
-      fecharModal();
-      loadData();
-    } catch(e) { toast(e.message, 'error'); }
+    await comLoading(document.getElementById('btnSalvar'), async () => {
+      try {
+        if (editingId) {
+          await req(cfg.path + '/' + editingId, 'PUT', body);
+          toast('Atualizado com sucesso! 💖', 'success');
+        } else {
+          await req(cfg.path, 'POST', body);
+          toast('Criado com sucesso! ✨', 'success');
+        }
+        fecharModal();
+        loadData();
+      } catch(e) { toast(e.message, 'error'); }
+    });
   }
 
-  async function deletar(id) {
+  async function deletar(id, btn) {
     if (!confirm('Tem certeza? Essa ação não pode ser desfeita 💔')) return;
     const cfg = sectionConfig[currentSection];
-    try {
-      await req(cfg.path + '/' + id, 'DELETE');
-      toast('Deletado! 🗑️', 'success');
-      loadData();
-    } catch(e) { toast(e.message, 'error'); }
+    await comLoading(btn, async () => {
+      try {
+        await req(cfg.path + '/' + id, 'DELETE');
+        toast('Deletado! 🗑️', 'success');
+        loadData();
+      } catch(e) { toast(e.message, 'error'); }
+    });
   }
 
   // ── ASSISTENTE DE ESTILO (IA) ──
@@ -1058,7 +1137,7 @@
         ? Object.values(barbiesData._embedded)[0]
         : (Array.isArray(barbiesData) ? barbiesData : []);
       barbieSel.innerHTML = '<option value="">— Selecione uma Barbie —</option>' +
-        barbies.map(b => `<option value="${b.id}">${b.nome} (#${b.id})</option>`).join('');
+        barbies.map(b => `<option value="${escapeHtml(b.id)}">${escapeHtml(b.nome)} (#${escapeHtml(b.id)})</option>`).join('');
 
       try {
         const eventosData = await req('/api/eventos?size=100');
@@ -1066,12 +1145,12 @@
           ? Object.values(eventosData._embedded)[0]
           : (Array.isArray(eventosData) ? eventosData : []);
         eventoSel.innerHTML = '<option value="">— Nenhum / usar ocasião livre —</option>' +
-          eventos.map(e => `<option value="${e.id}">${e.nomeEvento} (#${e.id})</option>`).join('');
+          eventos.map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.nomeEvento)} (#${escapeHtml(e.id)})</option>`).join('');
       } catch (e) {
         eventoSel.innerHTML = '<option value="">— Nenhum / usar ocasião livre —</option>';
       }
     } catch (e) {
-      barbieSel.innerHTML = `<option value="">Erro ao carregar: ${e.message}</option>`;
+      barbieSel.innerHTML = `<option value="">Erro ao carregar: ${escapeHtml(e.message)}</option>`;
       toast(e.message, 'error');
     }
   }
@@ -1113,7 +1192,7 @@
       <li><strong>${escapeHtml(i.nome)}</strong> <span style="color:var(--muted)">(${escapeHtml(i.categoria)})</span><br>${escapeHtml(i.motivo)}</li>
     `).join('');
     const imagem = data.imagem?.dataUrl
-      ? `<img class="ia-imagem" id="imgLook${lookId}" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" onerror="recuperarImagem(${lookId}, this)" onload="verificarImagem(${lookId}, this)" />`
+      ? `<img class="ia-imagem" id="imgLook${lookId}" src="${escapeHtml(data.imagem.dataUrl)}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" onerror="recuperarImagem(${lookId}, this)" onload="verificarImagem(${lookId}, this)" />`
       : '';
     return `
       ${imagem}
@@ -1123,8 +1202,8 @@
       <div class="ia-tags">${corTags}${acessTags}</div>
       ${itens ? `<ul class="ia-items">${itens}</ul>` : ''}
       <div class="ia-acoes">
-        <button class="btn-pink" onclick="verDicas(${lookId})">💡 Dicas aprimoradas</button>
-        <button class="btn-outline" onclick="outraImagem(${lookId})">🔄 Outra imagem</button>
+        <button class="btn-pink" onclick="verDicas(${lookId}, this)">💡 Dicas aprimoradas</button>
+        <button class="btn-outline" onclick="outraImagem(${lookId}, this)">🔄 Outra imagem</button>
         <button class="btn-outline" onclick="copiarLook(${lookId})">📋 Copiar look</button>
       </div>
     `;
@@ -1142,41 +1221,52 @@
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
   }
 
+  // data: URLs não devem receber query string: isso corrompe o base64 do SVG.
+  function urlComCacheBust(url) {
+    if (!url || /^data:/i.test(url)) return url;
+    return url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+  }
+
   function verificarImagem(lookId, el) {
-    setTimeout(() => {
-      if (el.naturalWidth === 0) recuperarImagem(lookId, el);
-    }, 12000);
+    if (el.dataset.verificado === '1') return;
+    const d = (window._looks || {})[lookId] || window._ultimoLook;
+    if (!d) return;
+    // A imagem é uma data: URL determinística. Não recarregar a cada load
+    // (isso causava loop) e nunca concatenar query string no base64.
+    if (el.complete && el.naturalWidth > 0) {
+      el.dataset.verificado = '1';
+    }
   }
 
   async function recuperarImagem(lookId, el) {
     if (el.dataset.recuperando === '1') return;
     el.dataset.recuperando = '1';
-    el.dataset.tentativas = String(Number(el.dataset.tentativas || 0) + 1);
-    el.src = placeholderImagem('A preparar outra imagem…');
+    const tentativa = Number(el.dataset.tentativas || 0) + 1;
+    el.dataset.tentativas = String(tentativa);
+    el.src = placeholderImagem('A desenhar a ilustração…');
 
     const d = (window._looks || {})[lookId] || window._ultimoLook;
     if (!d) { el.dataset.recuperando = '0'; return; }
 
     try {
-      const img = await req(IA_PATH + '/regerar-imagem', 'POST', corpoLook(d));
+      // A ilustração é vetorial e determinística: não depende de cota externa.
+      const img = await req(IA_PATH + '/regerar-imagem', 'POST', corpoLook(d, '', true));
       d.imagem = img;
-      el.src = img.dataUrl + '&retry=' + Date.now();
-      toast('Nova imagem carregada! 🎨', 'success');
+      el.src = urlComCacheBust(img.dataUrl);
+      toast('Nova ilustração carregada! 🎨', 'success');
     } catch (e) {
-      if (Number(el.dataset.tentativas) < 3) {
-        // O gerador gratuito pode limitar a 1 imagem por IP a cada 45s.
+      if (tentativa < 3) {
+        el.src = placeholderImagem('A tentar de novo…');
         setTimeout(() => {
           el.dataset.recuperando = '0';
           recuperarImagem(lookId, el);
-        }, 46000);
-        el.src = placeholderImagem('A aguardar o gerador…');
-      } else {
-        el.src = placeholderImagem('Clique em "Outra imagem" para tentar');
+        }, 2000 * tentativa);
+        return;
       }
+      el.src = placeholderImagem('Clique em "Outra imagem" para tentar');
+      toast(e.message, 'error');
     }
-    if (el.dataset.recuperando === '1') {
-      setTimeout(() => { el.dataset.recuperando = '0'; }, 1000);
-    }
+    el.dataset.recuperando = '0';
   }
 
   function htmlDicas(data) {
@@ -1200,8 +1290,11 @@
     `;
   }
 
-  function corpoLook(d, foco = '') {
+  function corpoLook(d, foco = '', proximaVariacao = false) {
     const barbieSel = document.getElementById('iaBarbie');
+    const atual = Number(d._variacaoImagem ?? d.variacaoImagem ?? 0);
+    if (proximaVariacao) d._variacaoImagem = (atual + 1) % 1001;
+
     const body = {
       barbieId: Number(barbieSel.value) || d.barbieId,
       tituloLook: d.tituloLook || 'Look sugerido',
@@ -1210,15 +1303,12 @@
       itensSugeridos: (d.itensSugeridos || []).map(i => typeof i === 'string' ? i : i.nome),
       acessoriosRecomendados: d.acessoriosDoAcervoRecomendados || [],
       promptImagem: d.promptImagem || '',
-      foco: foco || ''
+      foco: foco || '',
+      variacaoImagem: Number(d._variacaoImagem ?? atual)
     };
     if (d._eventoId) body.eventoId = d._eventoId;
     if (d.ocasiao || d._ocasiao) body.ocasiao = d.ocasiao || d._ocasiao;
     if (d._preferencias) body.preferencias = d._preferencias;
-
-    const url = String(d.imagem?.dataUrl || '');
-    const m = url.match(/[?&]variation=(\d+)/);
-    if (m) body.variacaoImagem = Number(m[1]);
     return body;
   }
 
@@ -1239,23 +1329,25 @@
     }));
   }
 
-  async function outraImagem(lookId) {
+  async function outraImagem(lookId, btn) {
     const d = (window._looks || {})[lookId] || window._ultimoLook;
     if (!d) { toast('Gere um look primeiro!', 'error'); return; }
 
     const bubble = addChatBubble('ia',
       '<div class="spinner"></div><div style="text-align:center">A desenhar outra versão da Barbie…</div>');
-    try {
-      const img = await req(IA_PATH + '/regerar-imagem', 'POST', corpoLook(d));
-      d.imagem = img;
-      const el = document.getElementById('imgLook' + lookId);
-      if (el) el.src = img.dataUrl + '&t=' + Date.now();
-      bubble.innerHTML = '🎨 Outra versão pronta! A imagem acima foi atualizada.';
-      toast('Nova imagem gerada! 🎨', 'success');
-    } catch (e) {
-      bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
-      toast(e.message, 'error');
-    }
+    await comLoading(btn, async () => {
+      try {
+        const img = await req(IA_PATH + '/regerar-imagem', 'POST', corpoLook(d, '', true));
+        d.imagem = img;
+        const el = document.getElementById('imgLook' + lookId);
+        if (el) el.src = urlComCacheBust(img.dataUrl);
+        bubble.innerHTML = '🎨 Outra versão pronta! A imagem acima foi atualizada.';
+        toast('Nova ilustração gerada! 🎨', 'success');
+      } catch (e) {
+        bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
+        toast(e.message, 'error');
+      }
+    });
   }
 
   async function pedirDicas(lookId, foco = '') {
@@ -1302,23 +1394,25 @@
 
     input.value = '';
 
-    // Se já existe um look e a mensagem pede melhorias, refinamos esse look
-    // em vez de gerar outro do zero.
-    if (window._ultimoLookId && /\b(dica|dicas|aprimor|melhor|refin|aperfeico|ajuste)\w*/i.test(mensagem)) {
-      await pedirDicas(window._ultimoLookId, mensagem);
-      return;
-    }
+    await comLoading(document.getElementById('btnEnviar'), async () => {
+      // Se já existe um look e a mensagem pede melhorias, refinamos esse look
+      // em vez de gerar outro do zero.
+      if (window._ultimoLookId && /\b(dica|dicas|aprimor|melhor|refin|aperfeico|ajuste)\w*/i.test(mensagem)) {
+        await pedirDicas(window._ultimoLookId, mensagem);
+        return;
+      }
 
-    addChatBubble('user', escapeHtml(mensagem));
+      addChatBubble('user', escapeHtml(mensagem));
 
-    const eventoId = document.getElementById('iaEvento').value;
-    const preferencias = document.getElementById('iaPreferencias').value.trim();
-    const body = { barbieId: Number(barbieId) };
-    if (eventoId) body.eventoId = Number(eventoId);
-    else body.ocasiao = mensagem;
-    if (preferencias) body.preferencias = preferencias;
+      const eventoId = document.getElementById('iaEvento').value;
+      const preferencias = document.getElementById('iaPreferencias').value.trim();
+      const body = { barbieId: Number(barbieId) };
+      if (eventoId) body.eventoId = Number(eventoId);
+      else body.ocasiao = mensagem;
+      if (preferencias) body.preferencias = preferencias;
 
-    await gerarLookChat(body);
+      await gerarLookChat(body);
+    });
   }
 
   async function gerarLook() {
@@ -1330,14 +1424,16 @@
     if (!barbieId) { toast('Selecione uma Barbie!', 'error'); return; }
     if (!eventoId && !ocasiao) { toast('Escolha um evento OU descreva a ocasião!', 'error'); return; }
 
-    addChatBubble('user', escapeHtml(ocasiao || 'Usar evento cadastrado'));
+    await comLoading(document.getElementById('btnGerarLook'), async () => {
+      addChatBubble('user', escapeHtml(ocasiao || 'Usar evento cadastrado'));
 
-    const body = { barbieId: Number(barbieId) };
-    if (eventoId) body.eventoId = Number(eventoId);
-    else body.ocasiao = ocasiao;
-    if (preferencias) body.preferencias = preferencias;
+      const body = { barbieId: Number(barbieId) };
+      if (eventoId) body.eventoId = Number(eventoId);
+      else body.ocasiao = ocasiao;
+      if (preferencias) body.preferencias = preferencias;
 
-    await gerarLookChat(body);
+      await gerarLookChat(body);
+    });
   }
 
   function copiarLook(lookId) {
@@ -1350,7 +1446,13 @@
       '', 'Itens sugeridos:',
       ...(d.itensSugeridos || []).map(i => `- ${i.nome} (${i.categoria}): ${i.motivo}`)
     ].join('\n');
-    navigator.clipboard.writeText(texto).then(() => toast('Look copiado! 📋', 'success'));
+    if (!navigator.clipboard?.writeText) {
+      toast('Copiagem não disponível neste navegador.', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(texto)
+      .then(() => toast('Look copiado! 📋', 'success'))
+      .catch(() => toast('Não foi possível copiar. Tente novamente.', 'error'));
   }
 
   // ── TOAST ──
@@ -1367,21 +1469,33 @@
   // browser para o chat e as operações de escrita funcionarem sem passos manuais.
   async function garantirApiKey() {
     const input = document.getElementById('apiKeyInput');
-    if (input.value.trim()) return;
-    try {
-      const res = await fetch(BASE + '/api/auth/api-keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner: 'Frontend Barbie Dreamworld', accessLevel: 'WRITE' })
-      });
-      if (res.ok) {
-        const d = await res.json();
-        if (d.apiKey) {
-          input.value = d.apiKey;
-          localStorage.setItem('barbie_api_key', d.apiKey);
+    if (input.value.trim()) return input.value.trim();
+
+    // Evita que várias requisições 401 simultâneas gerem várias chaves.
+    if (garantindoChave) return garantindoChave;
+
+    garantindoChave = (async () => {
+      try {
+        const res = await fetch(BASE + '/api/auth/api-keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ owner: 'Frontend Barbie Dreamworld', accessLevel: 'WRITE' })
+        });
+        if (res.ok) {
+          const d = await res.json();
+          if (d.apiKey) {
+            input.value = d.apiKey;
+            localStorage.setItem('barbie_api_key', d.apiKey);
+            return d.apiKey;
+          }
         }
+      } catch (e) {
+        // A API do Render pode estar a acordar; o init tenta novamente.
       }
-    } catch (e) { /* a API vai dormir; o utilizador pode gerar a chave no separador Auth */ }
+      return '';
+    })().finally(() => { garantindoChave = null; });
+
+    return garantindoChave;
   }
 
   // ── INIT ──
