@@ -450,6 +450,30 @@
       background: var(--card-bg); font-size: .85rem;
     }
     .ia-items li strong { color: var(--pink-deep); }
+    .ia-acoes { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .3rem; }
+    .ia-acoes button { font-size: .8rem; padding: .5rem .85rem; }
+    .ia-dicas { margin-top: .6rem; }
+    .ia-dicas-titulo {
+      font-family: 'Playfair Display', serif; font-size: 1.1rem;
+      color: var(--pink-deep); margin-bottom: .4rem;
+    }
+    .ia-dicas-resumo { font-size: .85rem; color: var(--muted); margin-bottom: .8rem; }
+    .dica-card {
+      display: flex; gap: .6rem; padding: .7rem .8rem; margin-bottom: .5rem;
+      border-radius: 12px; background: var(--pink-pale); border: 1px solid var(--border);
+    }
+    .dica-card .dica-icone { font-size: 1.1rem; line-height: 1.2; }
+    .dica-card .dica-cat {
+      display: inline-block; font-size: .68rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em;
+      color: var(--pink-deep); margin-bottom: .15rem;
+    }
+    .dica-card .dica-titulo { font-weight: 700; font-size: .86rem; color: var(--text); }
+    .dica-card .dica-desc { font-size: .8rem; line-height: 1.5; color: var(--muted); }
+    .ia-toque-final {
+      margin-top: .7rem; padding: .7rem .9rem; border-radius: 12px;
+      background: #fff4d6; border: 1px solid #f0c36d; font-size: .85rem;
+    }
     .ia-empty { text-align: center; color: var(--muted); padding: 2rem 1rem; font-size: .9rem; }
   </style>
 </head>
@@ -1075,6 +1099,14 @@
   }
 
   function htmlLook(data) {
+    // Cada look recebe um id próprio para as dicas usarem exatamente o contexto
+    // dele, mesmo que a conversa tenha vários looks gerados.
+    const lookId = ++htmlLook.seq;
+    window._looks = window._looks || {};
+    window._looks[lookId] = data;
+    window._ultimoLookId = lookId;
+    window._ultimoLook = data;
+
     const corTags = (data.paletaCores || []).map(c => `<span class="tag">🎨 ${escapeHtml(c)}</span>`).join('');
     const acessTags = (data.acessoriosDoAcervoRecomendados || []).map(a => `<span class="tag green">👛 ${escapeHtml(a)}</span>`).join('');
     const itens = (data.itensSugeridos || []).map(i => `
@@ -1090,8 +1122,65 @@
       <div class="ia-look-resumo">${escapeHtml(data.resumo)}</div>
       <div class="ia-tags">${corTags}${acessTags}</div>
       ${itens ? `<ul class="ia-items">${itens}</ul>` : ''}
-      <button class="btn-outline" onclick="copiarLook()">📋 Copiar look</button>
+      <div class="ia-acoes">
+        <button class="btn-pink" onclick="pedirDicas(${lookId})">💡 Dicas aprimoradas</button>
+        <button class="btn-outline" onclick="copiarLook(${lookId})">📋 Copiar look</button>
+      </div>
     `;
+  }
+  htmlLook.seq = 0;
+
+  function htmlDicas(data) {
+    const cards = (data.dicas || []).map(d => `
+      <div class="dica-card">
+        <div class="dica-icone">✨</div>
+        <div>
+          <div class="dica-cat">${escapeHtml(d.categoria)}</div>
+          <div class="dica-titulo">${escapeHtml(d.titulo)}</div>
+          <div class="dica-desc">${escapeHtml(d.descricao)}</div>
+        </div>
+      </div>
+    `).join('');
+    return `
+      <div class="ia-dicas">
+        <div class="ia-dicas-titulo">${escapeHtml(data.titulo)}</div>
+        <div class="ia-dicas-resumo">${escapeHtml(data.resumo)}</div>
+        ${cards}
+        ${data.toqueFinal ? `<div class="ia-toque-final">💖 ${escapeHtml(data.toqueFinal)}</div>` : ''}
+      </div>
+    `;
+  }
+
+  async function pedirDicas(lookId, foco = '') {
+    const d = (window._looks || {})[lookId] || window._ultimoLook;
+    if (!d) { toast('Gere um look primeiro!', 'error'); return; }
+
+    addChatBubble('user', `💡 ${foco ? escapeHtml(foco) : 'Quero dicas aprimoradas para este look'}`);
+    const bubble = addChatBubble('ia',
+      '<div class="spinner"></div><div style="text-align:center">A estilista está a refinar o look…</div>');
+
+    const barbieSel = document.getElementById('iaBarbie');
+    const body = {
+      barbieId: Number(barbieSel.value) || d.barbieId,
+      tituloLook: d.tituloLook || 'Look sugerido',
+      resumo: d.resumo || '',
+      paletaCores: d.paletaCores || [],
+      itensSugeridos: (d.itensSugeridos || []).map(i => typeof i === 'string' ? i : i.nome),
+      acessoriosRecomendados: d.acessoriosDoAcervoRecomendados || [],
+      foco: foco || ''
+    };
+    if (d._eventoId) body.eventoId = d._eventoId;
+    if (d.ocasiao || d._ocasiao) body.ocasiao = d.ocasiao || d._ocasiao;
+    if (d._preferencias) body.preferencias = d._preferencias;
+
+    try {
+      const data = await req(IA_PATH + '/dicas', 'POST', body);
+      bubble.innerHTML = htmlDicas(data);
+      toast('Dicas aprimoradas prontas! ✨', 'success');
+    } catch (e) {
+      bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
+      toast(e.message, 'error');
+    }
   }
 
   async function gerarLookChat(body) {
@@ -1099,8 +1188,11 @@
       '<div class="spinner"></div><div style="text-align:center">A criar o look e a desenhar a Barbie…</div>');
     try {
       const data = await req(IA_PATH, 'POST', body);
+      // Guarda o contexto original para as dicas refinarem este mesmo look.
+      data._eventoId = body.eventoId;
+      data._preferencias = body.preferencias;
+      data._ocasiao = body.ocasiao;
       bubble.innerHTML = htmlLook(data);
-      window._ultimoLook = data;
       toast('Look gerado com sucesso! ✨', 'success');
     } catch (e) {
       bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
@@ -1116,6 +1208,14 @@
     if (!barbieId) { toast('Selecione uma Barbie primeiro!', 'error'); return; }
 
     input.value = '';
+
+    // Se já existe um look e a mensagem pede melhorias, refinamos esse look
+    // em vez de gerar outro do zero.
+    if (window._ultimoLookId && /\b(dica|dicas|aprimor|melhor|refin|aperfeico|ajuste)\w*/i.test(mensagem)) {
+      await pedirDicas(window._ultimoLookId, mensagem);
+      return;
+    }
+
     addChatBubble('user', escapeHtml(mensagem));
 
     const eventoId = document.getElementById('iaEvento').value;
@@ -1147,8 +1247,8 @@
     await gerarLookChat(body);
   }
 
-  function copiarLook() {
-    const d = window._ultimoLook;
+  function copiarLook(lookId) {
+    const d = (window._looks || {})[lookId] || window._ultimoLook;
     if (!d) return;
     const texto = [
       d.tituloLook, '', d.resumo, '',
