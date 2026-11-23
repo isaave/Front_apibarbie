@@ -1113,7 +1113,7 @@
       <li><strong>${escapeHtml(i.nome)}</strong> <span style="color:var(--muted)">(${escapeHtml(i.categoria)})</span><br>${escapeHtml(i.motivo)}</li>
     `).join('');
     const imagem = data.imagem?.dataUrl
-      ? `<img class="ia-imagem" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" />`
+      ? `<img class="ia-imagem" id="imgLook${lookId}" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" />`
       : '';
     return `
       ${imagem}
@@ -1123,7 +1123,8 @@
       <div class="ia-tags">${corTags}${acessTags}</div>
       ${itens ? `<ul class="ia-items">${itens}</ul>` : ''}
       <div class="ia-acoes">
-        <button class="btn-pink" onclick="pedirDicas(${lookId})">💡 Dicas aprimoradas</button>
+        <button class="btn-pink" onclick="verDicas(${lookId})">💡 Dicas aprimoradas</button>
+        <button class="btn-outline" onclick="outraImagem(${lookId})">🔄 Outra imagem</button>
         <button class="btn-outline" onclick="copiarLook(${lookId})">📋 Copiar look</button>
       </div>
     `;
@@ -1151,14 +1152,7 @@
     `;
   }
 
-  async function pedirDicas(lookId, foco = '') {
-    const d = (window._looks || {})[lookId] || window._ultimoLook;
-    if (!d) { toast('Gere um look primeiro!', 'error'); return; }
-
-    addChatBubble('user', `💡 ${foco ? escapeHtml(foco) : 'Quero dicas aprimoradas para este look'}`);
-    const bubble = addChatBubble('ia',
-      '<div class="spinner"></div><div style="text-align:center">A estilista está a refinar o look…</div>');
-
+  function corpoLook(d, foco = '') {
     const barbieSel = document.getElementById('iaBarbie');
     const body = {
       barbieId: Number(barbieSel.value) || d.barbieId,
@@ -1173,8 +1167,58 @@
     if (d.ocasiao || d._ocasiao) body.ocasiao = d.ocasiao || d._ocasiao;
     if (d._preferencias) body.preferencias = d._preferencias;
 
+    const url = String(d.imagem?.dataUrl || '');
+    const m = url.match(/[?&]variation=(\d+)/);
+    if (m) body.variacaoImagem = Number(m[1]);
+    return body;
+  }
+
+  function verDicas(lookId) {
+    const d = (window._looks || {})[lookId] || window._ultimoLook;
+    if (!d) { toast('Gere um look primeiro!', 'error'); return; }
+
+    if (!d.dicas || !d.dicas.length) {
+      pedirDicas(lookId);
+      return;
+    }
+    addChatBubble('user', '💡 Quero as dicas aprimoradas deste look');
+    addChatBubble('ia', htmlDicas({
+      titulo: 'Dicas aprimoradas para ' + (d.tituloLook || 'este look'),
+      resumo: 'Refinamentos sugeridos pela estilista para a ocasião.',
+      dicas: d.dicas,
+      toqueFinal: ''
+    }));
+  }
+
+  async function outraImagem(lookId) {
+    const d = (window._looks || {})[lookId] || window._ultimoLook;
+    if (!d) { toast('Gere um look primeiro!', 'error'); return; }
+
+    const bubble = addChatBubble('ia',
+      '<div class="spinner"></div><div style="text-align:center">A desenhar outra versão da Barbie…</div>');
     try {
-      const data = await req(IA_PATH + '/dicas', 'POST', body);
+      const img = await req(IA_PATH + '/regerar-imagem', 'POST', corpoLook(d));
+      d.imagem = img;
+      const el = document.getElementById('imgLook' + lookId);
+      if (el) el.src = img.dataUrl + '&t=' + Date.now();
+      bubble.innerHTML = '🎨 Outra versão pronta! A imagem acima foi atualizada.';
+      toast('Nova imagem gerada! 🎨', 'success');
+    } catch (e) {
+      bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
+      toast(e.message, 'error');
+    }
+  }
+
+  async function pedirDicas(lookId, foco = '') {
+    const d = (window._looks || {})[lookId] || window._ultimoLook;
+    if (!d) { toast('Gere um look primeiro!', 'error'); return; }
+
+    addChatBubble('user', `💡 ${foco ? escapeHtml(foco) : 'Quero dicas aprimoradas para este look'}`);
+    const bubble = addChatBubble('ia',
+      '<div class="spinner"></div><div style="text-align:center">A estilista está a refinar o look…</div>');
+
+    try {
+      const data = await req(IA_PATH + '/dicas', 'POST', corpoLook(d, foco));
       bubble.innerHTML = htmlDicas(data);
       toast('Dicas aprimoradas prontas! ✨', 'success');
     } catch (e) {
