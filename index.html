@@ -1113,7 +1113,7 @@
       <li><strong>${escapeHtml(i.nome)}</strong> <span style="color:var(--muted)">(${escapeHtml(i.categoria)})</span><br>${escapeHtml(i.motivo)}</li>
     `).join('');
     const imagem = data.imagem?.dataUrl
-      ? `<img class="ia-imagem" id="imgLook${lookId}" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" onerror="recuperarImagem(${lookId}, this)" />`
+      ? `<img class="ia-imagem" id="imgLook${lookId}" src="${data.imagem.dataUrl}" alt="Barbie com o look ${escapeHtml(data.tituloLook)}" onerror="recuperarImagem(${lookId}, this)" onload="verificarImagem(${lookId}, this)" />`
       : '';
     return `
       ${imagem}
@@ -1140,6 +1140,12 @@
       <text x="256" y="510" text-anchor="middle" font-family="Arial" font-size="16" fill="#a24a70">${mensagem}</text>
     </svg>`;
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  }
+
+  function verificarImagem(lookId, el) {
+    setTimeout(() => {
+      if (el.naturalWidth === 0) recuperarImagem(lookId, el);
+    }, 12000);
   }
 
   async function recuperarImagem(lookId, el) {
