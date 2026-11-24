@@ -423,6 +423,35 @@
     }
     .chat-bubble .ia-imagem { max-width: 250px; margin: .8rem auto .3rem; }
     .chat-bubble .ia-look-titulo { font-size: 1.15rem; }
+
+    /* ✨ Glitter quando o resultado da IA aparece */
+    .chat-bubble { position: relative; }
+    .chat-bubble.glitterando { animation: brilhoResultado .9s ease-out; }
+    @keyframes brilhoResultado {
+      from { box-shadow: 0 0 0 0 rgba(255,45,120,.35); }
+      to   { box-shadow: 0 0 0 14px rgba(255,45,120,0); }
+    }
+    .glitter {
+      position: absolute; inset: 0; overflow: hidden;
+      border-radius: inherit; pointer-events: none; z-index: 3;
+    }
+    .glitter i {
+      position: absolute; top: 0; left: var(--x);
+      width: var(--s); height: var(--s);
+      background: var(--c); border-radius: 50% 50% 25% 25%;
+      box-shadow: 0 0 7px 2px var(--c); opacity: 0;
+      animation: glitterCair var(--d) ease-in var(--delay) forwards;
+    }
+    @keyframes glitterCair {
+      0%   { opacity: 0; transform: translate3d(0,-16px,0) rotate(0deg) scale(.4); }
+      18%  { opacity: 1; }
+      70%  { opacity: .9; }
+      100% { opacity: 0; transform: translate3d(var(--dx),var(--dy),0) rotate(280deg) scale(1.15); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .chat-bubble.glitterando { animation: none; }
+      .glitter { display: none; }
+    }
     .chat-input-row {
       display: flex; gap: .5rem; padding-top: .8rem;
       border-top: 1.5px solid var(--border);
@@ -1193,6 +1222,34 @@
   }
 
   // ── CONVERSA COM A ESTILISTA IA ──
+  /** Faz chover confete/glitter sobre o balão assim que o resultado da IA chega. */
+  function soltarGlitter(el) {
+    if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const camada = document.createElement('div');
+    camada.className = 'glitter';
+    const cores = ['#ff2d78', '#ffd166', '#ffffff', '#c77dff', '#7ae7ff'];
+    const altura = Math.max(el.offsetHeight, el.querySelector('.ia-imagem') ? 320 : 160);
+
+    for (let i = 0; i < 22; i++) {
+      const particula = document.createElement('i');
+      particula.style.setProperty('--x', (2 + Math.random() * 94).toFixed(1) + '%');
+      particula.style.setProperty('--dx', ((Math.random() - .5) * 60).toFixed(0) + 'px');
+      particula.style.setProperty('--dy', (altura + 20) + 'px');
+      particula.style.setProperty('--s', (4 + Math.random() * 6).toFixed(1) + 'px');
+      particula.style.setProperty('--c', cores[i % cores.length]);
+      particula.style.setProperty('--d', (1.1 + Math.random() * .7).toFixed(2) + 's');
+      particula.style.setProperty('--delay', (Math.random() * .35).toFixed(2) + 's');
+      camada.appendChild(particula);
+    }
+
+    el.classList.add('glitterando');
+    el.appendChild(camada);
+    setTimeout(() => {
+      camada.remove();
+      el.classList.remove('glitterando');
+    }, 2400);
+  }
+
   function addChatBubble(tipo, html, registrar = true) {
     const empty = document.getElementById('chatEmpty');
     if (empty) empty.remove();
@@ -1356,12 +1413,13 @@
       return;
     }
     addChatBubble('user', '💡 Quero as dicas aprimoradas deste look');
-    addChatBubble('ia', htmlDicas({
+    const bubble = addChatBubble('ia', htmlDicas({
       titulo: 'Dicas aprimoradas para ' + (d.tituloLook || 'este look'),
       resumo: 'Refinamentos sugeridos pela estilista para a ocasião.',
       dicas: d.dicas,
       toqueFinal: ''
     }));
+    soltarGlitter(bubble);
   }
 
   async function outraImagem(lookId, btn) {
@@ -1377,6 +1435,7 @@
         const el = document.getElementById('imgLook' + lookId);
         if (el) el.src = urlComCacheBust(img.dataUrl);
         bubble.innerHTML = '🎨 Outra versão pronta! A imagem acima foi atualizada.';
+        soltarGlitter(el || bubble);
         toast('Nova ilustração gerada! 🎨', 'success');
       } catch (e) {
         bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
@@ -1396,6 +1455,7 @@
     try {
       const data = await req(IA_PATH + '/dicas', 'POST', corpoLook(d, foco));
       bubble.innerHTML = htmlDicas(data);
+      soltarGlitter(bubble);
       toast('Dicas aprimoradas prontas! ✨', 'success');
     } catch (e) {
       bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
@@ -1414,6 +1474,7 @@
       data._preferencias = body.preferencias;
       data._ocasiao = body.ocasiao;
       bubble.innerHTML = htmlLook(data);
+      soltarGlitter(bubble);
       toast('Look gerado com sucesso! ✨', 'success');
     } catch (e) {
       bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
