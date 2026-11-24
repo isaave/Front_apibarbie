@@ -1476,6 +1476,16 @@
       bubble.innerHTML = htmlLook(data);
       soltarGlitter(bubble);
       toast('Look gerado com sucesso! ✨', 'success');
+
+      // Se os geradores de foto estavam no limite e veio o SVG de emergência,
+      // tenta uma única vez conseguir uma foto realista (sem laço infinito).
+      if ((data.imagem?.mimeType || '') === 'image/svg+xml' && !data._tentativaFoto) {
+        data._tentativaFoto = true;
+        window._looks[window._ultimoLookId] = data;
+        const btnFoto = bubble.querySelectorAll('.ia-acoes button')[1];
+        toast('Gerador de fotos ocupado: tentando uma foto realista…');
+        setTimeout(() => outraImagem(window._ultimoLookId, btnFoto), 800);
+      }
     } catch (e) {
       bubble.innerHTML = `💔 ${escapeHtml(e.message)}`;
       toast(e.message, 'error');
