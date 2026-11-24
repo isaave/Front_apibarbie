@@ -636,7 +636,9 @@
 <div id="toast"></div>
 
 <script>
-  const BASE = 'https://projeto2-apibarbie.onrender.com';
+  // URL pública da API. Pode ser sobrescrita antes deste script com
+  // window.APIBARBIE_API_BASE (ver .env.example); por padrão usa o deploy real.
+  const BASE = (window.APIBARBIE_API_BASE || 'https://projeto2-apibarbie.onrender.com').replace(/\/$/, '');
   let currentSection = 'barbies';
   let currentPage = 0;
   let totalPages = 1;
