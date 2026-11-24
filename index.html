@@ -656,6 +656,20 @@
 
   function apiKey() { return document.getElementById('apiKeyInput').value.trim(); }
 
+  // Contexto controlado do chat: guardamos só as 6 mensagens recentes (400 chars
+  // cada) e o servidor volta a limitar antes de montar o prompt da IA.
+  const MAX_HISTORICO = 6;
+  window._historicoChat = [];
+  function registrarHistorico(papel, texto) {
+    const limpo = String(texto || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    if (!limpo) return;
+    window._historicoChat.push({ papel, texto: limpo });
+    if (window._historicoChat.length > MAX_HISTORICO) {
+      window._historicoChat.splice(0, window._historicoChat.length - MAX_HISTORICO);
+    }
+  }
+  function historicoChat() { return (window._historicoChat || []).slice(-MAX_HISTORICO); }
+
   // O Render free suspende o serviço após inatividade; a primeira chamada
   // pode levar ~50 s só para "acordar". Por isso o prazo é generoso.
   const TIMEOUT_MS = 120000;
@@ -1177,7 +1191,7 @@
   }
 
   // ── CONVERSA COM A ESTILISTA IA ──
-  function addChatBubble(tipo, html) {
+  function addChatBubble(tipo, html, registrar = true) {
     const empty = document.getElementById('chatEmpty');
     if (empty) empty.remove();
     const wrap = document.createElement('div');
@@ -1185,6 +1199,7 @@
     const bubble = document.createElement('div');
     bubble.className = 'chat-bubble';
     bubble.innerHTML = html;
+    if (registrar) registrarHistorico(tipo === 'ia' ? 'ia' : 'user', bubble.textContent);
     wrap.appendChild(bubble);
     const msgs = document.getElementById('chatMsgs');
     msgs.appendChild(wrap);
@@ -1321,7 +1336,8 @@
       acessoriosRecomendados: d.acessoriosDoAcervoRecomendados || [],
       promptImagem: d.promptImagem || '',
       foco: foco || '',
-      variacaoImagem: Number(d._variacaoImagem ?? atual)
+      variacaoImagem: Number(d._variacaoImagem ?? atual),
+      historico: historicoChat()
     };
     if (d._eventoId) body.eventoId = d._eventoId;
     if (d.ocasiao || d._ocasiao) body.ocasiao = d.ocasiao || d._ocasiao;
@@ -1351,7 +1367,7 @@
     if (!d) { toast('Gere um look primeiro!', 'error'); return; }
 
     const bubble = addChatBubble('ia',
-      '<div class="spinner"></div><div style="text-align:center">A desenhar outra versão da Barbie…</div>');
+      '<div class="spinner"></div><div style="text-align:center">A desenhar outra versão da Barbie…</div>', false);
     await comLoading(btn, async () => {
       try {
         const img = await req(IA_PATH + '/regerar-imagem', 'POST', corpoLook(d, '', true));
@@ -1373,7 +1389,7 @@
 
     addChatBubble('user', `💡 ${foco ? escapeHtml(foco) : 'Quero dicas aprimoradas para este look'}`);
     const bubble = addChatBubble('ia',
-      '<div class="spinner"></div><div style="text-align:center">A estilista está a refinar o look…</div>');
+      '<div class="spinner"></div><div style="text-align:center">A estilista está a refinar o look…</div>', false);
 
     try {
       const data = await req(IA_PATH + '/dicas', 'POST', corpoLook(d, foco));
@@ -1387,8 +1403,9 @@
 
   async function gerarLookChat(body) {
     const bubble = addChatBubble('ia',
-      '<div class="spinner"></div><div style="text-align:center">A criar o look e a desenhar a Barbie…</div>');
+      '<div class="spinner"></div><div style="text-align:center">A criar o look e a desenhar a Barbie…</div>', false);
     try {
+      body.historico = historicoChat();
       const data = await req(IA_PATH, 'POST', body);
       // Guarda o contexto original para as dicas refinarem este mesmo look.
       data._eventoId = body.eventoId;
